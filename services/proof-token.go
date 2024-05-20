@@ -117,7 +117,7 @@ func CalcProofToken(proof *models.ParamGetPow) string {
 	doneChan := make(chan struct{})
 	defer close(doneChan)
 
-	numWorkers := 8 // 这可以根据CPU的核心数调整
+	numWorkers := 8 // 这可以根据CPU的核心数调整1
 	for i := 0; i < numWorkers; i++ {
 		go calcPart(i*50000, (i+1)*50000, proof, resultChan, doneChan)
 	}
