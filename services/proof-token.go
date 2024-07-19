@@ -125,16 +125,18 @@ func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan ch
 func CalcProofToken(proof *models.ParamGetPow) string {
 	start := time.Now()
 	getDpl(proof.Proxy, proof.UserAgent)
-	timeout := time.Second * 6
+	timeout := time.Second * 4
 
 	resultChan := make(chan string, 1)
 	doneChan := make(chan struct{})
 	closeOnce := &sync.Once{} // 创建一个sync.Once实例
 
-	numWorkers := 3
+	numWorkers := 8
+
+	fmt.Println("pow", proof.Seed, proof.Diff)
 
 	for i := 0; i < numWorkers; i++ {
-		go calcPart(i*60000, (i+1)*60000, proof, resultChan, doneChan, closeOnce)
+		go calcPart(i*50000, (i+1)*50000, proof, resultChan, doneChan, closeOnce)
 	}
 
 	select {
