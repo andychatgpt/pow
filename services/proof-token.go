@@ -63,7 +63,7 @@ func getDpl(proxy, userAgent string) {
 		return
 	}
 	if proxy != "" {
-		util.Client.SetProxy(proxy)
+		_ = util.Client.SetProxy(proxy)
 	}
 	cachedScripts = append(cachedScripts, "https://cdn.oaistatic.com/_next/static/chunks/9598-0150caea9526d55d.js?dpl=abad631f183104e6c8a323392d7bc30b933c5c7c")
 	cachedDpl = "dpl=abad631f183104e6c8a323392d7bc30b933c5c7c"
@@ -108,7 +108,7 @@ func CalcProofToken(proof *models.ParamGetPow) (string, error) {
 
 	// 启动1000个协程
 	for i := 0; i < 1000; i++ {
-		go GenerateConfig(ctx, i*1000, 1000, proof.Seed, proof.Diff, result, proof.UserAgent)
+		go GenerateConfig(ctx, i*1000, 500, proof.Seed, proof.Diff, result, proof.UserAgent)
 	}
 
 	// 等待结果或超时
