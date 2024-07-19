@@ -131,7 +131,7 @@ func CalcProofToken(proof *models.ParamGetPow) string {
 	doneChan := make(chan struct{})
 	closeOnce := &sync.Once{} // 创建一个sync.Once实例
 
-	numWorkers := 8
+	numWorkers := 3
 
 	for i := 0; i < numWorkers; i++ {
 		go calcPart(i*60000, (i+1)*60000, proof, resultChan, doneChan, closeOnce)
