@@ -101,14 +101,14 @@ func getDpl(proxy, userAgent string) {
 }
 
 func CalcProofToken(proof *models.ParamGetPow) (string, error) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 
 	result := make(chan string)
 
 	// 启动1000个协程
-	for i := 0; i < 1000; i++ {
-		go GenerateConfig(ctx, i*1000, 500, proof.Seed, proof.Diff, result, proof.UserAgent)
+	for i := 0; i < 500; i++ {
+		go GenerateConfig(ctx, i*1000, 1000, proof.Seed, proof.Diff, result, proof.UserAgent)
 	}
 
 	// 等待结果或超时
@@ -116,7 +116,7 @@ func CalcProofToken(proof *models.ParamGetPow) (string, error) {
 	case a := <-result:
 		cancel() // 一旦找到结果，取消其他协程
 		return a, nil
-	case <-time.After(time.Second * 5):
+	case <-ctx.Done():
 		cancel()
 		return "", fmt.Errorf("timeout")
 	}
