@@ -17,7 +17,7 @@ func Get(c *gin.Context) {
 		return
 	}
 
-	if token := services.CalcProofToken(&jsons); token != "" {
+	if token, _ := services.CalcProofToken(&jsons); token != "" {
 		c.JSON(200, gin.H{
 			"code":    "ok",
 			"data":    token,

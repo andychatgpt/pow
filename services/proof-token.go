@@ -1,17 +1,20 @@
 package services
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bogdanfinn/fhttp"
+	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/sha3"
 	"math/rand"
 	"pow/models"
 	"pow/util"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,13 +28,21 @@ var (
 	timeLayout      = "Mon Jan 2 2006 15:04:05"
 	startTime       = time.Now()
 )
+
 var (
-	cachedSid          = uuid.NewString()
-	cachedHardware     = 0
-	cachedScripts      []string
-	cachedDpl          = ""
+	cachedSid      = uuid.NewString()
+	cachedHardware = 0
+	cachedScripts  []string
+	cachedDpl      = ""
+	configPool     = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
 	CachedRequireProof = ""
 )
+
+type Config []string
 
 func getParseTime() string {
 	now := time.Now()
@@ -40,6 +51,7 @@ func getParseTime() string {
 }
 
 func getConfig(userAgent string) []interface{} {
+	getDpl("", userAgent)
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
 	timeNum := (float64(time.Since(startTime).Nanoseconds()) + rand.Float64()) / 1e6
@@ -88,65 +100,62 @@ func getDpl(proxy, userAgent string) {
 
 }
 
-func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan chan<- string, doneChan chan struct{}, closeOnce *sync.Once) {
-	hasher := sha3.New512()
-	diffLen := len(proof.Diff)
-	config := getConfig(proof.UserAgent)
+func CalcProofToken(proof *models.ParamGetPow) (string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	loopCount := 0
+	result := make(chan string)
 
-	for i := startIndex; i < endIndex; i++ {
-		loopCount++
-		select {
-		case <-doneChan:
-			return
-		default:
-			config[3] = i
-			config[9] = (i + 2) / 2
-			json, _ := json.Marshal(config)
-			base := base64.StdEncoding.EncodeToString(json)
-			hasher.Write([]byte(proof.Seed + base))
-			hash := hasher.Sum(nil)
-			hasher.Reset()
-			if hex.EncodeToString(hash[:diffLen]) <= proof.Diff {
-				resultChan <- base
-				return
-			}
-			if loopCount >= 30000 {
-				closeOnce.Do(func() {
-					close(doneChan) // 使用sync.Once确保只关闭一次
-				})
-				return
-			}
-		}
+	// 启动1000个协程
+	for i := 0; i < 1000; i++ {
+		go GenerateConfig(ctx, i*1000, 1000, proof.Seed, proof.Diff, result, proof.UserAgent)
+	}
+
+	// 等待结果或超时
+	select {
+	case a := <-result:
+		cancel() // 一旦找到结果，取消其他协程
+		return a, nil
+	case <-time.After(time.Second * 5):
+		cancel()
+		return "", fmt.Errorf("timeout")
 	}
 }
 
-func CalcProofToken(proof *models.ParamGetPow) string {
-	start := time.Now()
-	getDpl(proof.Proxy, proof.UserAgent)
-	timeout := time.Second * 4
+func GenerateConfig(ctx context.Context, startIndex, size int, seed string, diff string, result chan<- string, UserAgent string) {
 
-	resultChan := make(chan string, 1)
-	doneChan := make(chan struct{})
-	closeOnce := &sync.Once{} // 创建一个sync.Once实例
+	config := getConfig(UserAgent)
 
-	numWorkers := 8
+	for i := startIndex; i < startIndex+size; i++ {
+		select {
+		case <-ctx.Done(): // 如果上下文被取消，则退出
+			return
+		default:
+			config[3] = strconv.Itoa(i)
+			config[9] = strconv.Itoa((i + 2) / 2)
 
-	fmt.Println("pow", proof.Seed, proof.Diff)
+			buf := configPool.Get().(*bytes.Buffer)
+			buf.Reset()
+			enc := sonic.ConfigDefault.NewEncoder(buf)
+			if err := enc.Encode(config); err != nil {
+				configPool.Put(buf)
+				continue
+			}
 
-	for i := 0; i < numWorkers; i++ {
-		go calcPart(i*50000, (i+1)*50000, proof, resultChan, doneChan, closeOnce)
-	}
+			line := buf.Bytes()
+			base := base64.StdEncoding.EncodeToString(line)
+			digest := sha3.Sum512([]byte(seed + base))
+			configPool.Put(buf)
 
-	select {
-	case result := <-resultChan:
-		elapsed := time.Since(start)
-		fmt.Println("time: ", elapsed, "pow", proof.Seed, proof.Diff)
-		return result
-	case <-time.After(timeout):
-		return ""
-	case <-doneChan:
-		return ""
+			// 改为前3个字节的比较
+			if hex.EncodeToString(digest[:3]) <= diff {
+				select {
+				case result <- base:
+					return
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
 	}
 }
