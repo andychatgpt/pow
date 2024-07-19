@@ -3,7 +3,7 @@ package services
 import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bogdanfinn/fhttp"
-	"net/http"
+	//"net/http"
 	"pow/util"
 	"strings"
 )
