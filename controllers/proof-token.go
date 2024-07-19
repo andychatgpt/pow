@@ -32,3 +32,8 @@ func Get(c *gin.Context) {
 		"message": "",
 	})
 }
+
+func CachedScripts(c *gin.Context) {
+	data, _ := services.GetScripts()
+	c.JSON(200, data)
+}

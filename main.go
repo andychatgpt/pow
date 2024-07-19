@@ -11,6 +11,7 @@ func main() {
 	r := gin.Default()
 	// 定义一个GET请求的路由处理函数
 	r.POST("/pow/get", controllers.Get)
+	r.Any("/pow/scripts", controllers.CachedScripts)
 
 	// 启动HTTP服务，监听在本地的8080端口
 	log.Println(8081)

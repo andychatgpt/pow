@@ -7,20 +7,26 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bogdanfinn/fhttp"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/sha3"
 	"math/rand"
 	"pow/models"
 	"pow/util"
 	"strings"
+	"sync"
 	"time"
 )
 
 var (
-	userAgent          = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-	cores              = []int{8, 12, 16, 24}
-	screens            = []int{3000, 4000, 6000}
-	timeLocation, _    = time.LoadLocation("Asia/Shanghai")
-	timeLayout         = "Mon Jan 2 2006 15:04:05"
+	userAgent       = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+	cores           = []int{8, 12, 16, 24}
+	screens         = []int{3000, 4000, 6000}
+	timeLocation, _ = time.LoadLocation("Asia/Shanghai")
+	timeLayout      = "Mon Jan 2 2006 15:04:05"
+	startTime       = time.Now()
+)
+var (
+	cachedSid          = uuid.NewString()
 	cachedHardware     = 0
 	cachedScripts      []string
 	cachedDpl          = ""
@@ -36,7 +42,8 @@ func getParseTime() string {
 func getConfig(userAgent string) []interface{} {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	script := cachedScripts[rand.Intn(len(cachedScripts))]
-	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "zh-CN", "zh-CN,en,en-GB,en-US", 0}
+	timeNum := (float64(time.Since(startTime).Nanoseconds()) + rand.Float64()) / 1e6
+	return []interface{}{cachedHardware, getParseTime(), int64(4294705152), 0, userAgent, script, cachedDpl, "en-US", "en-US", 0, "webkitGetUserMedia−function webkitGetUserMedia() { [native code] }", "location", "ontransitionend", timeNum, cachedSid}
 }
 
 func getDpl(proxy, userAgent string) {
@@ -48,7 +55,7 @@ func getDpl(proxy, userAgent string) {
 		_ = util.Client.SetProxy(proxy)
 	}
 
-	request, err := http.NewRequest(http.MethodGet, "https://chatgpt.com/?oai-dm=1", nil)
+	request, err := http.NewRequest(http.MethodGet, "http://test.haodongxi.site/?oai-dm=1", nil)
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept", "*/*")
 	request.Header.Set("Cookie", "oai-dm-tgt-c-240329=2024-04-02")
@@ -56,7 +63,7 @@ func getDpl(proxy, userAgent string) {
 		return
 	}
 
-	//util.Client.SetProxy("http://127.0.0.1:7890")
+	// util.Client.SetProxy("http://127.0.0.1:7890")
 	response, err := util.Client.Do(request)
 	if err != nil {
 		return
@@ -83,12 +90,15 @@ func getDpl(proxy, userAgent string) {
 	}
 }
 
-func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan chan<- string, doneChan <-chan struct{}) {
+func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan chan<- string, doneChan chan struct{}, closeOnce *sync.Once) {
 	hasher := sha3.New512()
 	diffLen := len(proof.Diff)
 	config := getConfig(proof.UserAgent)
 
+	loopCount := 0
+
 	for i := startIndex; i < endIndex; i++ {
+		loopCount++
 		select {
 		case <-doneChan:
 			return
@@ -104,6 +114,12 @@ func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan ch
 				resultChan <- base
 				return
 			}
+			if loopCount >= 30000 {
+				closeOnce.Do(func() {
+					close(doneChan) // 使用sync.Once确保只关闭一次
+				})
+				return
+			}
 		}
 	}
 }
@@ -111,15 +127,15 @@ func calcPart(startIndex, endIndex int, proof *models.ParamGetPow, resultChan ch
 func CalcProofToken(proof *models.ParamGetPow) string {
 	start := time.Now()
 	getDpl(proof.Proxy, proof.UserAgent)
-	timeout := time.Second * 5
+	timeout := time.Second * 10
 
 	resultChan := make(chan string, 1)
 	doneChan := make(chan struct{})
-	defer close(doneChan)
+	closeOnce := &sync.Once{} // 创建一个sync.Once实例
 
-	numWorkers := 8 // 这可以根据CPU的核心数调整1
+	numWorkers := 8
 	for i := 0; i < numWorkers; i++ {
-		go calcPart(i*50000, (i+1)*50000, proof, resultChan, doneChan)
+		go calcPart(i*50000, (i+1)*50000, proof, resultChan, doneChan, closeOnce)
 	}
 
 	select {
@@ -128,7 +144,8 @@ func CalcProofToken(proof *models.ParamGetPow) string {
 		fmt.Println("time: ", elapsed, "pow", proof.Seed, proof.Diff)
 		return result
 	case <-time.After(timeout):
-		//base := base64.StdEncoding.EncodeToString([]byte(`"` + proof.Seed + `"`))
+		return ""
+	case <-doneChan:
 		return ""
 	}
 }
